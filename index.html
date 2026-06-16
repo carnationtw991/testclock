@@ -15,6 +15,17 @@
   <!-- 3. 引入 Babel (讓瀏覽器能直接看得懂 JSX 語法，免編譯) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- 配置 Babel 強制使用傳統 Runtime (Classic Runtime) 以避免產生瀏覽器不支援的 import 語句 -->
+  <script>
+    if (window.Babel) {
+      Babel.registerPreset('react-classic', {
+        presets: [
+          [Babel.availablePresets['react'], { runtime: 'classic' }]
+        ]
+      });
+    }
+  </script>
+
   <!-- 客製化滾動條樣式 -->
   <style>
     .custom-scrollbar::-webkit-scrollbar { width: 8px; }
@@ -28,8 +39,9 @@
   <!-- React 應用程式的掛載點 -->
   <div id="root"></div>
 
-  <!-- 核心程式碼區塊 -->
-  <script type="text/babel">
+  <!-- 核心程式碼區塊：指定 env 與我們註冊的 react-classic 模式 -->
+  <script type="text/babel" data-presets="env,react-classic">
+    
     const { useState, useEffect, useRef } = React;
 
     function App() {
