@@ -342,19 +342,37 @@
       }
 
       useEffect(() => {
-        // 自動投影邏輯：當考試時間到 (idle 變成 running)，自動切換至學生視窗
+        if (!activeExam) return;
+
+        // 1. 自動投影邏輯：當考試時間到 (idle 變成 running)，自動切換至學生視窗
         if (computedTimerState === 'running' && prevTimerState.current === 'idle') {
           setViewMode('student');
         }
 
-        // 偵測狀態變成 ended 時播放鈴聲
+        // 2. 偵測狀態變成 ended 時播放鈴聲
         if (computedTimerState === 'ended' && prevTimerState.current === 'running') {
           if (isBellEnabled) {
             playEndBell();
           }
         }
+        
+        // 3. 節次時間到，延遲 12 秒後自動換下一個節次
+        if (computedTimerState === 'ended') {
+          const end = getTodayDateFromTimeString(activeExam.endTime);
+          const secondsSinceEnd = Math.floor((currentTime - end) / 1000);
+          
+          if (secondsSinceEnd >= 12) {
+            const currentIndex = exams.findIndex(e => e.id === activeExamId);
+            // 確認還有下一節考試
+            if (currentIndex !== -1 && currentIndex < exams.length - 1) {
+              setActiveExamId(exams[currentIndex + 1].id);
+              setViewMode('student'); // 確保繼續保持投影狀態
+            }
+          }
+        }
+
         prevTimerState.current = computedTimerState;
-      }, [computedTimerState, isBellEnabled]);
+      }, [computedTimerState, currentTime, activeExam, exams, activeExamId, isBellEnabled]);
 
       const enterStudentView = () => setViewMode('student');
       const exitStudentView = () => setViewMode('teacher');
@@ -502,7 +520,7 @@
                    {currentTime.toLocaleTimeString('zh-TW', { hour12: false })}
                 </div>
                 <button onClick={enterStudentView} className="flex items-center gap-2 bg-rose-400 hover:bg-rose-500 border-4 border-white text-white px-8 py-3 rounded-full font-black shadow-[0_6px_0_0_rgba(225,29,72,1)] active:shadow-none active:translate-y-[6px] transition-all text-lg" title="點擊切換為學生投影畫面">
-                  <span className="text-2xl">🖥️</span> 學生投影
+                  <span className="text-2xl">🖥️</span> 開啟投影畫面
                 </button>
               </div>
             </header>
