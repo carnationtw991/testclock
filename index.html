@@ -66,11 +66,13 @@
         return initialExams.length > 0 ? initialExams[0].id : null;
       });
       
-      // 計時器狀態
-      const [timerState, setTimerState] = useState('idle'); 
+      // 計時器與鈴聲狀態
       const [currentTime, setCurrentTime] = useState(new Date());
-      const [targetEndTime, setTargetEndTime] = useState(null);
-      const prevTimerState = useRef(timerState);
+      const [isBellEnabled, setIsBellEnabled] = useState(() => {
+        const saved = localStorage.getItem('exam_timer_bell');
+        return saved ? JSON.parse(saved) : true;
+      });
+      const prevTimerState = useRef('idle');
       
       // 人數統計 
       const [attendance, setAttendance] = useState(() => {
@@ -122,6 +124,7 @@
       useEffect(() => { localStorage.setItem('exam_timer_reminders', JSON.stringify(reminders)); }, [reminders]);
       useEffect(() => { localStorage.setItem('exam_timer_reminder_font_size', reminderFontSize.toString()); }, [reminderFontSize]);
       useEffect(() => { localStorage.setItem('exam_timer_memo', memo); }, [memo]);
+      useEffect(() => { localStorage.setItem('exam_timer_bell', JSON.stringify(isBellEnabled)); }, [isBellEnabled]);
 
       // 播放結束鈴聲函式
       const playEndBell = () => {
@@ -161,26 +164,6 @@
           console.log("瀏覽器阻擋了自動播放音效", e);
         }
       };
-
-      useEffect(() => {
-        let interval;
-        if (timerState === 'running') {
-          interval = setInterval(() => {
-            if (targetEndTime && new Date() >= targetEndTime) {
-              setTimerState('ended');
-              clearInterval(interval);
-            }
-          }, 1000);
-        }
-        
-        // 偵測狀態變成 ended 時播放鈴聲
-        if (timerState === 'ended' && prevTimerState.current !== 'ended') {
-          playEndBell();
-        }
-        prevTimerState.current = timerState;
-        
-        return () => clearInterval(interval);
-      }, [timerState, targetEndTime]);
 
       // --- 輔助函式 ---
       const getTodayDateFromTimeString = (timeStr) => {
@@ -268,25 +251,6 @@
       };
 
       // --- 操作動作 ---
-      const handleStartTimer = () => {
-        const activeExam = exams.find(e => e.id === activeExamId);
-        if (!activeExam) return;
-        const end = getTodayDateFromTimeString(activeExam.endTime);
-        if (end <= new Date()) {
-          setModalConfig({ type: 'alert', title: '時間錯誤', message: '考試結束時間已經過囉，無法開始。', onConfirm: () => {} });
-          return;
-        }
-        setTargetEndTime(end);
-        setTimerState('running');
-      };
-
-      const handlePauseTimer = () => setTimerState('paused');
-      const handleResumeTimer = () => setTimerState('running');
-      const handleResetTimer = () => {
-        setTimerState('idle');
-        setTargetEndTime(null);
-      };
-
       const handleSaveExam = () => {
         if (!examFormData.name || !examFormData.startTime || !examFormData.endTime) {
           setFormError('請填寫完整資訊');
@@ -345,35 +309,52 @@
         });
       };
 
-      // --- 計算顯示文字 ---
+      // --- 計算顯示文字與自動狀態 ---
       const activeExam = exams.find(e => e.id === activeExamId);
+      let computedTimerState = 'idle';
       let displayTime = "--:--";
       let displayStatus = "請選擇考試";
 
       if (activeExam) {
-        if (timerState === 'idle') {
-          const startTime = getTodayDateFromTimeString(activeExam.startTime);
+        const start = getTodayDateFromTimeString(activeExam.startTime);
+        const end = getTodayDateFromTimeString(activeExam.endTime);
+
+        if (currentTime < start) {
+          computedTimerState = 'idle';
           displayStatus = "距離考試開始還有";
-          if (currentTime < startTime) {
-            const diff = Math.floor((startTime - currentTime) / 1000);
-            const h = Math.floor(diff / 3600);
-            const m = Math.floor((diff % 3600) / 60);
-            const s = diff % 60;
-            displayTime = `${h > 0 ? h + ':' : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-          } else {
-            displayTime = `${activeExam.duration}:00`;
-          }
-        } else if (timerState === 'ended') {
-          displayStatus = "考試結束鐘聲響了";
-          displayTime = "00:00";
-        } else {
+          const diff = Math.floor((start - currentTime) / 1000);
+          const h = Math.floor(diff / 3600);
+          const m = Math.floor((diff % 3600) / 60);
+          const s = diff % 60;
+          displayTime = `${h > 0 ? h + ':' : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        } else if (currentTime >= start && currentTime < end) {
+          computedTimerState = 'running';
           displayStatus = "剩下考試時間";
-          const diff = Math.max(0, Math.floor((targetEndTime - currentTime) / 1000));
+          const diff = Math.floor((end - currentTime) / 1000);
           const m = Math.floor(diff / 60);
           const s = diff % 60;
           displayTime = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        } else {
+          computedTimerState = 'ended';
+          displayStatus = "考試結束鐘聲響了";
+          displayTime = "00:00";
         }
       }
+
+      useEffect(() => {
+        // 自動投影邏輯：當考試時間到 (idle 變成 running)，自動切換至學生視窗
+        if (computedTimerState === 'running' && prevTimerState.current === 'idle') {
+          setViewMode('student');
+        }
+
+        // 偵測狀態變成 ended 時播放鈴聲
+        if (computedTimerState === 'ended' && prevTimerState.current === 'running') {
+          if (isBellEnabled) {
+            playEndBell();
+          }
+        }
+        prevTimerState.current = computedTimerState;
+      }, [computedTimerState, isBellEnabled]);
 
       const enterStudentView = () => setViewMode('student');
       const exitStudentView = () => setViewMode('teacher');
@@ -434,14 +415,14 @@
 
               <div className="flex-1 flex flex-row items-center justify-center w-full min-h-0 py-2 relative px-4 md:px-12 gap-6 md:gap-12 z-10">
                 <div className={`text-[3.5vh] md:text-[4vh] font-black tracking-[0.2em] px-6 py-5 md:py-8 rounded-[2.5rem] border-4 shadow-[0_8px_0_0_rgba(0,0,0,0.1)] shrink-0 z-10 transition-colors text-center leading-relaxed ${
-                  timerState === 'ended' ? 'text-white border-rose-500 bg-rose-500 animate-pulse' : 
-                  timerState === 'paused' ? 'text-amber-700 border-amber-400 bg-amber-100' : 'bg-white border-amber-300 text-amber-600'
+                  computedTimerState === 'ended' ? 'text-white border-rose-500 bg-rose-500' : 
+                  'bg-white border-amber-300 text-amber-600'
                 }`}>
                   {formatStatusToMultiline(displayStatus)}
                 </div>
                 <div className={`flex-1 flex justify-center text-[min(32vw,42vh)] leading-[0.85] pb-2 font-black font-mono tabular-nums drop-shadow-[0_15px_15px_rgba(0,0,0,0.1)] transition-all duration-700 ${
-                  timerState === 'ended' ? 'text-rose-600 scale-105' : 
-                  (timerState === 'running' && targetEndTime && (targetEndTime - currentTime < 300000)) ? 'text-rose-500' : 'text-sky-800'
+                  computedTimerState === 'ended' ? 'text-rose-600 scale-105' : 
+                  (computedTimerState === 'running' && activeExam && (getTodayDateFromTimeString(activeExam.endTime) - currentTime < 300000)) ? 'text-rose-500' : 'text-sky-800'
                 }`}>
                   {displayTime}
                 </div>
@@ -520,8 +501,8 @@
                 <div className="text-4xl font-mono bg-sky-50 border-4 border-sky-200 px-6 py-2 rounded-full font-black text-sky-600">
                    {currentTime.toLocaleTimeString('zh-TW', { hour12: false })}
                 </div>
-                <button onClick={enterStudentView} className="flex items-center gap-2 bg-rose-400 hover:bg-rose-500 border-4 border-white text-white px-8 py-3 rounded-full font-black shadow-[0_6px_0_0_rgba(225,29,72,1)] active:shadow-none active:translate-y-[6px] transition-all text-lg">
-                  <span className="text-2xl">🖥️</span> 開啟投影畫面
+                <button onClick={enterStudentView} className="flex items-center gap-2 bg-rose-400 hover:bg-rose-500 border-4 border-white text-white px-8 py-3 rounded-full font-black shadow-[0_6px_0_0_rgba(225,29,72,1)] active:shadow-none active:translate-y-[6px] transition-all text-lg" title="點擊切換為學生投影畫面">
+                  <span className="text-2xl">🖥️</span> 學生投影
                 </button>
               </div>
             </header>
@@ -643,26 +624,21 @@
                 <div className="bg-white rounded-[2.5rem] shadow-[0_8px_0_0_rgba(199,210,254,1)] p-8 border-4 border-indigo-200">
                   <div className="text-center py-10 bg-indigo-50 rounded-[2.5rem] mb-8 border-4 border-indigo-200 shadow-inner">
                     <div className="text-2xl font-black text-indigo-400 mb-3 tracking-widest">{displayStatus}</div>
-                    <div className={`text-8xl font-black ${timerState === 'ended' ? 'text-rose-500' : (timerState === 'running' && targetEndTime && (targetEndTime - currentTime < 300000)) ? 'text-rose-500' : 'text-indigo-500'}`}>
+                    <div className={`text-8xl font-black ${computedTimerState === 'ended' ? 'text-rose-500' : (computedTimerState === 'running' && activeExam && (getTodayDateFromTimeString(activeExam.endTime) - currentTime < 300000)) ? 'text-rose-500' : 'text-indigo-500'}`}>
                       {displayTime}
                     </div>
                   </div>
                   <div className="flex justify-center gap-6">
-                    {timerState === 'idle' || timerState === 'ended' ? (
-                      <button onClick={handleStartTimer} className="flex items-center gap-3 bg-emerald-400 hover:bg-emerald-500 text-white px-12 py-5 rounded-full font-black text-2xl border-4 border-white shadow-[0_6px_0_0_rgba(16,185,129,1)] active:shadow-none active:translate-y-[6px] transition-all">
-                        <span className="text-3xl">▶️</span> 開始考試
-                      </button>
-                    ) : timerState === 'running' ? (
-                      <button onClick={handlePauseTimer} className="flex items-center gap-3 bg-amber-400 hover:bg-amber-500 text-white px-12 py-5 rounded-full font-black text-2xl border-4 border-white shadow-[0_6px_0_0_rgba(245,158,11,1)] active:shadow-none active:translate-y-[6px] transition-all">
-                        <span className="text-3xl">⏸️</span> 暫停一下
-                      </button>
-                    ) : (
-                      <button onClick={handleResumeTimer} className="flex items-center gap-3 bg-emerald-400 hover:bg-emerald-500 text-white px-12 py-5 rounded-full font-black text-2xl border-4 border-white shadow-[0_6px_0_0_rgba(16,185,129,1)] active:shadow-none active:translate-y-[6px] transition-all">
-                        <span className="text-3xl">▶️</span> 繼續考試
-                      </button>
-                    )}
-                    <button onClick={handleResetTimer} className="flex items-center gap-3 bg-slate-200 hover:bg-slate-300 text-slate-600 px-10 py-5 rounded-full font-black text-2xl border-4 border-white shadow-[0_6px_0_0_rgba(148,163,184,1)] active:shadow-none active:translate-y-[6px] transition-all">
-                      <span className="text-3xl">⏹️</span> 重新設定
+                    <button 
+                      onClick={() => setIsBellEnabled(!isBellEnabled)} 
+                      className={`flex items-center gap-3 px-12 py-5 rounded-full font-black text-2xl border-4 border-white active:translate-y-[6px] transition-all ${
+                        isBellEnabled 
+                          ? 'bg-emerald-400 hover:bg-emerald-500 text-white shadow-[0_6px_0_0_rgba(16,185,129,1)]' 
+                          : 'bg-slate-300 hover:bg-slate-400 text-slate-500 shadow-[0_6px_0_0_rgba(148,163,184,1)]'
+                      }`}
+                    >
+                      <span className="text-3xl">{isBellEnabled ? '🔔' : '🔕'}</span> 
+                      {isBellEnabled ? '考試結束鈴聲：開啟' : '考試結束鈴聲：關閉'}
                     </button>
                   </div>
                 </div>
